@@ -1,15 +1,21 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from google.transit import gtfs_realtime_pb2
 
 from core.client import stm_client
 from core.config import settings
+from core.filters.vehicles import VehicleFilter
 from core.models.vehicles import VehiclePosition
 
 router = APIRouter(prefix="/vehicles", tags=["vehicles"])
 
 
-@router.get("", response_model=list[VehiclePosition])
-async def get_vehicles():
+@router.get(
+    "",
+    response_model=list[VehiclePosition],
+    summary="Vehicle positions",
+    description="Returns real-time positions of all active STM vehicles from the GTFS-RT feed.",
+)
+async def get_vehicles(filters: VehicleFilter = Depends()):
     async with stm_client() as client:
         response = await client.get(settings.position_endpoint)
 
@@ -19,7 +25,7 @@ async def get_vehicles():
     feed = gtfs_realtime_pb2.FeedMessage()  # ty: ignore[unresolved-attribute]
     feed.ParseFromString(response.content)
 
-    return [
+    vehicles = [
         VehiclePosition(
             id=entity.id,
             route_id=entity.vehicle.trip.route_id,
@@ -36,3 +42,10 @@ async def get_vehicles():
         )
         for entity in feed.entity
     ]
+
+    if filters.route_id is not None:
+        vehicles = [v for v in vehicles if v.route_id == filters.route_id]
+    if filters.direction_id is not None:
+        vehicles = [v for v in vehicles if v.direction_id == filters.direction_id]
+
+    return vehicles
