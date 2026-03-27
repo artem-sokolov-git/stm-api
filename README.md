@@ -23,6 +23,7 @@ REST API поверх открытых данных STM (Société de transport 
 - **uv** — менеджер пакетов
 - **pytest** — интеграционные тесты
 - **ruff** — линтер и форматтер
+- **ty** — проверка типов
 - **Docker / Docker Compose** — контейнеризация
 
 ## Структура проекта
@@ -32,9 +33,18 @@ stm-api/
 ├── core/
 │   ├── __init__.py
 │   ├── config.py           # pydantic-settings: токен, URL endpoints
-│   └── main.py             # FastAPI app, /ping healthcheck
+│   ├── client.py           # httpx.AsyncClient factory с apikey заголовком
+│   ├── main.py             # FastAPI app
+│   ├── filters/
+│   │   └── vehicles.py     # VehicleFilter dataclass (query params)
+│   ├── models/
+│   │   └── vehicles.py     # VehiclePosition Pydantic model
+│   ├── routers/
+│   │   ├── health.py       # GET /ping
+│   │   └── vehicles.py     # GET /vehicles
+│   └── services/
+│       └── vehicles.py     # fetch_vehicles(): GTFS-RT → VehiclePosition
 ├── tests/
-│   ├── __init__.py
 │   ├── conftest.py         # pytest fixtures (httpx.Client с apikey)
 │   └── test_stm_status.py  # интеграционные тесты STM API
 ├── .env                    # переменные окружения (TOKEN)
@@ -65,16 +75,69 @@ TOKEN=your_api_key_here
 
 Переменная `TOKEN` используется как `apikey` в заголовках запросов к STM API.
 
+## API Endpoints
+
+### `GET /ping`
+Healthcheck.
+
+```json
+{"status": "ok"}
+```
+
+### `GET /vehicles`
+Реальные позиции всех активных транспортных средств STM из GTFS-RT фида.
+
+**Query params:**
+
+| Параметр       | Тип  | Описание                          |
+| -------------- | ---- | --------------------------------- |
+| `route_id`     | str  | Фильтр по маршруту (например, `69`) |
+| `direction_id` | int  | Фильтр по направлению (`0` или `1`) |
+
+**Пример ответа:**
+
+```json
+[
+  {
+    "id": "string",
+    "route_id": "69",
+    "direction_id": 0,
+    "trip_id": "string",
+    "latitude": 45.508,
+    "longitude": -73.587,
+    "bearing": 180.0,
+    "speed": 10.5,
+    "current_status": 2,
+    "stop_id": "string",
+    "occupancy_status": 1,
+    "timestamp": 1711500000
+  }
+]
+```
+
+## Архитектура
+
+Поток данных для `/vehicles`:
+
+```
+router → service → STM GTFS-RT (protobuf) → VehiclePosition models → фильтрация
+```
+
+- **Routers** (`core/routers/`) — HTTP-слой, принимают query params через `Depends()`
+- **Services** (`core/services/`) — бизнес-логика, async HTTP-запросы к STM API
+- **Models** (`core/models/`) — Pydantic-модели для ответов
+- **Filters** (`core/filters/`) — dataclass-зависимости для query params
+- **Client** (`core/client.py`) — `stm_client()` возвращает `httpx.AsyncClient` с pre-injected `apikey`
+
 ## Доступные команды (Makefile)
 
 ```
 make run       # Собрать и запустить контейнер
 make down      # Остановить контейнер
-make clear     # Остановить и удалить volumes
 make logs      # Логи контейнера
+make rebuild   # Пересобрать проект с нуля
 make check     # ruff lint + format check + ty check
 make tests     # Запустить pytest
-make rebuild   # Пересобрать проект с нуля
 ```
 
 ## Запуск
@@ -87,35 +150,20 @@ uv run granian --interface asgi --host 0.0.0.0 --port 8000 core.main:app
 make run
 ```
 
-Healthcheck: `GET /ping` → `{"status": "ok"}`
+## Тесты
 
-## Планируемые API Endpoints
+Интеграционные тесты — обращаются к реальному STM API. Требуется валидный `.env` с `TOKEN`.
 
-```
-GET /stops/nearby?lat=45.508&lon=-73.587&radius=500
-GET /stops/{stop_id}/departures?limit=5
-GET /vehicles/positions?route_id=69
-GET /routes?search=69
+```bash
+make tests
+# или отдельный тест:
+uv run pytest tests/test_stm_status.py::test_vehicle_positions
 ```
 
-## Планируемая структура проекта
+## Деплой
 
-```
-core/
-├── main.py
-├── config.py
-├── gtfs/
-│   ├── static.py       # загрузка и парсинг GTFS ZIP
-│   ├── realtime.py     # запросы к STM GTFS-RT
-│   └── models.py       # dataclasses: Stop, Departure, Route
-├── api/
-│   ├── stops.py        # GET /stops/nearby, GET /stops/{id}/departures
-│   ├── routes.py       # GET /routes/{id}
-│   └── vehicles.py     # GET /vehicles/positions
-└── services/
-    ├── stops.py        # find_nearby_stops(), get_departures()
-    └── cache.py        # in-memory кэш
-```
+Push в `main` → GitHub Actions → сборка Docker-образа → push в GitHub Container Registry (`ghcr.io`).
+Образ тегируется как `latest` и `sha-<commit>`.
 
 ## Статус
 
@@ -123,9 +171,11 @@ core/
 - [x] Инициализировать проект (`uv init stm-api`)
 - [x] Конфигурация через pydantic-settings
 - [x] Docker / Docker Compose с healthcheck
+- [x] HTTP-клиент (`httpx.AsyncClient`) с pre-injected apikey
 - [x] Интеграционные тесты GTFS-RT и Service Status
+- [x] `GET /vehicles` с фильтрацией по `route_id` и `direction_id`
+- [x] CI/CD: GitHub Actions → GHCR
 - [ ] Парсинг GTFS Static (stops, routes, trips)
-- [ ] Подключение GTFS-RT (tripUpdates, vehiclePositions)
 - [ ] Endpoint `/stops/nearby`
 - [ ] Endpoint `/stops/{id}/departures`
 - [ ] Telegram-бот (отдельный репо)
