@@ -31,8 +31,8 @@ logs: ## Show container logs
 # CHECKS
 check: ## Ruff lint and format check
 	@echo "$(CYAN)>>> Running ruff checks$(RESET)"
-	@uv run ruff check
-	@uv run ruff format --check
+	@uv run ruff format
+	@uv run ruff check --fix
 	@uv run ty check
 	@echo "$(GREEN)>>> Checks passed$(RESET)"
 
