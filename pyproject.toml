@@ -1,7 +1,7 @@
 [project]
-name = "stm-api"
+name = "transit-api"
 version = "0.1.0"
-description = ""
+description = "Real-time public transit data."
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [

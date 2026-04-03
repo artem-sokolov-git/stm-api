@@ -502,7 +502,7 @@ wheels = [
 ]
 
 [[package]]
-name = "stm-api"
+name = "transit-api"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [

@@ -1,9 +1,9 @@
-name: stm-service
+name: transit-service
 
 services:
   api:
     build: .
-    container_name: stm-api
+    container_name: transit-api
     env_file:
       - .env
     ports:
@@ -18,4 +18,4 @@ services:
 
 networks:
   default:
-    name: stm-net
+    name: transit-net
