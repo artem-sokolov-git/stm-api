@@ -27,7 +27,13 @@ class STMAPISettings(EnvBaseSettings):
         return f"{self.status_url}/etatservice"
 
 
-class Settings(ApplicationSettings, STMAPISettings):
+class GTFSSettings(EnvBaseSettings):
+    gtfs_static_url: str = "https://www.stm.info/sites/default/files/gtfs/gtfs_stm.zip"
+    gtfs_db_path: str = "gtfs.db"
+    gtfs_max_age_days: int = 7
+
+
+class Settings(ApplicationSettings, STMAPISettings, GTFSSettings):
     pass
 
 
