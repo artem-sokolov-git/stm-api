@@ -8,6 +8,7 @@ REST API поверх открытых данных STM (Société de transport 
 - **Granian** — ASGI-сервер (Rust-based, замена uvicorn)
 - **httpx** — async HTTP-клиент для запросов к STM API
 - **gtfs-realtime-bindings** — парсинг Protocol Buffer GTFS-RT
+- **SQLAlchemy + aiosqlite** — хранение и запросы к GTFS Static (SQLite)
 - **pydantic-settings** — конфигурация через переменные окружения
 - **uv** — менеджер пакетов
 - **pytest** — интеграционные тесты
@@ -22,13 +23,18 @@ REST API поверх открытых данных STM (Société de transport 
 | GTFS-RT VehiclePositions | `https://api.stm.info/pub/od/gtfs-rt/ic/v2/vehiclePositions`    | API-ключ |
 | GTFS-RT TripUpdates      | `https://api.stm.info/pub/od/gtfs-rt/ic/v2/tripUpdates`         | API-ключ |
 | Service Status           | `https://api.stm.info/pub/od/i3/v2/messages/etatservice`        | API-ключ |
+| GTFS Static (zip)        | `https://www.stm.info/sites/default/files/gtfs/gtfs_stm.zip`    | Открытый |
 
 Регистрация: https://portail.developpeurs.stm.info/apihub
 
 ## Архитектура
 
 ```
+# Реальное время
 router → service → STM GTFS-RT (protobuf) → Pydantic models → фильтрация
+
+# Статика
+router → service → SQLite (SQLAlchemy async) → Pydantic models
 ```
 
 Пакет `core/` организован по слоям:
@@ -37,8 +43,9 @@ router → service → STM GTFS-RT (protobuf) → Pydantic models → фильт
 - **Services** (`core/services/`) — бизнес-логика, async HTTP-запросы к STM API
 - **Models** (`core/models/`) — Pydantic-модели ответов
 - **Filters** (`core/filters/`) — dataclass-зависимости для query params
-- **Client** (`core/client.py`) — `stm_client()` возвращает `httpx.AsyncClient` с pre-injected `apikey`
-- **Config** (`core/config.py`) — `Settings` из `ApplicationSettings` + `STMAPISettings`, singleton `settings`
+- **Client** (`core/client.py`) — `auth_client()` возвращает `httpx.AsyncClient` с pre-injected `apikey`
+- **Static** (`core/static/stm/`) — `StaticDB`: при старте загружает GTFS zip и сохраняет в SQLite; обновляется если БД старше `GTFS_MAX_AGE_DAYS` (по умолчанию 7 дней)
+- **Config** (`core/config.py`) — `Settings` из `ApplicationSettings` + `STMAPISettings` + `GTFSSettings`, singleton `settings`
 
 ## Эндпоинты
 
@@ -162,6 +169,64 @@ Healthcheck.
   "route_id": "10",
   "vehicles": [...],
   "trips": [...]
+}
+```
+
+---
+
+### `GET /stm/static/routes/{route_id}`
+Статическая информация о маршруте из GTFS.
+
+**Ответ:** `RouteStatic`
+
+```json
+{
+  "route_id": "747",
+  "route_short_name": "747",
+  "route_long_name": "Aéroport P.-E.-Trudeau/Montréal",
+  "route_type": 3,
+  "route_color": "00A6DE"
+}
+```
+
+---
+
+### `GET /stm/static/routes/{route_id}/trips`
+Список рейсов маршрута из GTFS.
+
+**Query params:**
+
+| Параметр       | Тип | Описание                            |
+| -------------- | --- | ----------------------------------- |
+| `direction_id` | int | Фильтр по направлению (`0` или `1`) |
+
+**Ответ:** `list[TripStatic]`
+
+```json
+[
+  {
+    "trip_id": "...",
+    "route_id": "747",
+    "direction_id": 0,
+    "trip_headsign": "Aéroport",
+    "shape_id": "..."
+  }
+]
+```
+
+---
+
+### `GET /stm/static/stops/{stop_id}`
+Статическая информация об остановке из GTFS.
+
+**Ответ:** `StopStatic`
+
+```json
+{
+  "stop_id": "52328",
+  "stop_name": "Lionel-Groulx",
+  "stop_lat": 45.4732,
+  "stop_lon": -73.5700
 }
 ```
 
